@@ -366,20 +366,12 @@
         ], @[
             // Debug settings - only recommended for developer use
             @{@"icon": @"ladybug"},
-            @{@"key": @"debug_universal_script_jit",
-                @"icon": @"scroll",
-                @"type": self.typeSwitch,
-                @"requestReload": @YES,
-                @"enableCondition": ^BOOL(){
-                    return DeviceRequiresTXMWorkaround() && whenNotInGame();
-                },
-            },
             @{@"key": @"debug_always_attached_jit",
                 @"hasDetail": @YES,
                 @"icon": @"app.connected.to.app.below.fill",
                 @"type": self.typeSwitch,
                 @"enableCondition": ^BOOL(){
-                    return getPrefBool(@"debug.debug_universal_script_jit") && whenNotInGame();
+                    return DeviceRequiresTXMWorkaround() && whenNotInGame();
                 },
             },
             @{@"key": @"debug_skip_wait_jit",

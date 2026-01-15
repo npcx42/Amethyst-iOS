@@ -3,8 +3,15 @@
 #import "SurfaceViewController.h"
 #import "ios_uikit_bridge.h"
 #import "utils.h"
+#import "mach_excServer.h"
 
+#include <dlfcn.h>
+#include <libgen.h>
+#include <pthread.h>
 #include "external/fishhook/fishhook.h"
+
+mach_port_t excPort;
+void *hooked_dlopen_26_ppl(const char *path, int mode);
 
 void (*orig_abort)();
 void (*orig_exit)(int code);
@@ -59,15 +66,100 @@ void hooked_exit(int code) {
 }
 
 void* hooked_dlopen(const char* path, int mode) {
-    const char *home = getenv("HOME");
-    // Only proceed to check if dylib is in the home dir
-    char fullpath[PATH_MAX];
-    if (!path || !realpath(path, fullpath) || !strstr(fullpath, home)) {
-        return orig_dlopen(path, mode);
+    BOOL shouldUseDyldBypass26PPL = NO;
+    if (@available(iOS 19.0, *)) {
+        shouldUseDyldBypass26PPL = hwRedirectOrig[0] && !DeviceRequiresTXMWorkaround();
     }
-
-    PLPatchMachOPlatformForFile(path);
-    return orig_dlopen(path, mode);
+    // Only patch Mach-O and use dyld bypass dylib is in the home dir
+    const char *home = getenv("HOME");
+    char fullpath[PATH_MAX];
+    if (path && realpath(path, fullpath) && strstr(fullpath, home)) {
+        PLPatchMachOPlatformForFile(path);
+    } else {
+        // Disable dyld bypass if not loading from home dir
+        shouldUseDyldBypass26PPL = NO;
+    }
+    if (shouldUseDyldBypass26PPL) {
+        __attribute__((musttail)) return hooked_dlopen_26_ppl(path, mode);
+    } else {
+        __attribute__((musttail)) return orig_dlopen(path, mode);
+    }
+}
+// hack dlopen for non-TXM 26.x
+void *exception_handler(void *unused) {
+    mach_msg_server(mach_exc_server, sizeof(union __RequestUnion__catch_mach_exc_subsystem), excPort, MACH_MSG_OPTION_NONE);
+    abort();
+}
+void *hooked_dlopen_26_ppl(const char *path, int mode) {
+    if (!excPort) {
+        mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &excPort);
+        mach_port_insert_right(mach_task_self(), excPort, excPort, MACH_MSG_TYPE_MAKE_SEND);
+        pthread_t thread;
+        pthread_create(&thread, NULL, exception_handler, NULL);
+    }
+    
+    // save old thread states
+    exception_mask_t masks[32];
+    mach_msg_type_number_t masksCnt;
+    exception_handler_t handlers[32];
+    exception_behavior_t behaviors[32];
+    thread_state_flavor_t flavors[32];
+    arm_debug_state64_t origDebugState;
+    mach_port_t thread = mach_thread_self();
+    thread_get_state(thread, ARM_DEBUG_STATE64, (thread_state_t)&origDebugState, &(mach_msg_type_number_t){ARM_DEBUG_STATE64_COUNT});
+    thread_get_exception_ports(thread, EXC_MASK_BREAKPOINT, masks, &masksCnt, handlers, behaviors, flavors);
+    thread_set_exception_ports(thread, EXC_MASK_BREAKPOINT, excPort, EXCEPTION_STATE | MACH_EXCEPTION_CODES, ARM_THREAD_STATE64);
+    
+    // hook stuff. this will overwrite LiveContainer private container multitask's hook, we will load __TEXT using JIT inside
+    arm_debug_state64_t hookDebugState = {0};
+    for(int i = 0; i < 6 && hwRedirectOrig[i]; i++) {
+        hookDebugState.__bvr[i] = (uint64_t)hwRedirectOrig[i];
+        hookDebugState.__bcr[i] = 0x1e5;
+    }
+    thread_set_state(thread, ARM_DEBUG_STATE64, (thread_state_t)&hookDebugState, ARM_DEBUG_STATE64_COUNT);
+    
+    // fixup @loader_path since we cannot use musttail here
+    void *result;
+    void *callerAddr = __builtin_return_address(0);
+    struct dl_info info;
+    if (path && !strncmp(path, "@loader_path/", 13) && dladdr(callerAddr, &info)) {
+        char resolvedPath[PATH_MAX];
+        snprintf(resolvedPath, sizeof(resolvedPath), "%s/%s", dirname((char *)info.dli_fname), path + 13);
+        result = orig_dlopen(resolvedPath, mode);
+    } else {
+        result = orig_dlopen(path, mode);
+    }
+    
+    // restore old thread states
+    thread_set_state(thread, ARM_DEBUG_STATE64, (thread_state_t)&origDebugState, ARM_DEBUG_STATE64_COUNT);
+    for (int i = 0; i < masksCnt; i++){
+        thread_set_exception_ports(mach_thread_self(), EXC_MASK_BREAKPOINT, handlers[i], behaviors[i], flavors[i]);
+        mach_port_deallocate(mach_task_self(), handlers[i]);
+    }
+    
+    return result;
+}
+kern_return_t catch_mach_exception_raise_state( mach_port_t exception_port, exception_type_t exception, const mach_exception_data_t code, mach_msg_type_number_t codeCnt, int *flavor, const thread_state_t old_state, mach_msg_type_number_t old_stateCnt, thread_state_t new_state, mach_msg_type_number_t *new_stateCnt) {
+    arm_thread_state64_t *old = (arm_thread_state64_t *)old_state;
+    arm_thread_state64_t *new = (arm_thread_state64_t *)new_state;
+    uint64_t pc = arm_thread_state64_get_pc(*old);
+    
+    for(int i = 0; i < 6 && hwRedirectOrig[i]; i++) {
+        if(pc == (uint64_t)hwRedirectOrig[i]) {
+            *new = *old;
+            *new_stateCnt = old_stateCnt;
+            arm_thread_state64_set_pc_fptr(*new, hwRedirectTarget[i]);
+            return KERN_SUCCESS;
+        }
+    }
+    NSLog(@"[DyldLVBypass] Unknown breakpoint at pc: %p", (void*)pc);
+    return KERN_FAILURE;
+}
+kern_return_t catch_mach_exception_raise(mach_port_t exception_port, mach_port_t thread, mach_port_t task, exception_type_t exception, mach_exception_data_t code, mach_msg_type_number_t codeCnt) {
+    abort();
+}
+kern_return_t catch_mach_exception_raise_state_identity(mach_port_t exception_port, mach_port_t thread, mach_port_t task, exception_type_t exception, mach_exception_data_t code, mach_msg_type_number_t codeCnt, int *flavor, thread_state_t old_state, mach_msg_type_number_t old_stateCnt, thread_state_t new_state, mach_msg_type_number_t *new_stateCnt) {
+    abort();
 }
 
 int hooked_open(const char *path, int oflag, ...) {

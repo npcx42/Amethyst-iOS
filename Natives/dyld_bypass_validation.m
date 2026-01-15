@@ -66,8 +66,7 @@ bool redirectFunctionDirect(char *name, void *patchAddr, void *target) {
     NSDebugLog(@"[DyldLVBypass] hook %s succeed!", name);
     return TRUE;
 }
-// redirectFunction for iOS 26+ with TXM workaround
-// FIXME: test on non-TXM devices
+// redirectFunction for iOS 26+ (TXM)
 bool redirectFunctionMirrored(char *name, void *patchAddr, void *target) {
     if (DeviceRequiresTXMWorkaround()) {
         JIT26PrepareRegionForPatching(patchAddr, sizeof(patch));
@@ -92,6 +91,23 @@ bool redirectFunctionMirrored(char *name, void *patchAddr, void *target) {
     
     vm_deallocate(mach_task_self(), mirrored, sizeof(patch));
     return TRUE;
+}
+// redirectFunction for iOS 26+ (non-TXM)
+bool redirectFunctionHWBreakpoint(char *name, void *patchAddr, void *target) {
+    for(int i = 0; i < 6; i++) {
+        if(hwRedirectOrig[i] == (uint64_t)patchAddr) {
+            NSDebugLog(@"[DyldLVBypass] hook %s already exists!", name);
+            return TRUE;
+        } else if(!hwRedirectOrig[i]) {
+            hwRedirectOrig[i] = (uint64_t)patchAddr;
+            hwRedirectTarget[i] = (uint64_t)target;
+            NSDebugLog(@"[DyldLVBypass] hook %s succeed!", name);
+            return TRUE;
+        }
+    }
+    NSDebugLog(@"[DyldLVBypass] no slot for hook %s", name);
+    NSDebugLog(@"[DyldLVBypass] hook %s fails line %d", name, __LINE__);
+    return FALSE;
 }
 
 bool searchAndPatch(char *name, char *base, char *signature, int length, void *target) {
@@ -180,7 +196,7 @@ int hooked___fcntl(int fildes, int cmd, void *param) {
 
     // Signature sanity check by dyld
     else if (cmd == F_CHECK_LV) {
-        orig_fcntl(fildes, cmd, param);
+        //orig_fcntl(fildes, cmd, param);
         // Just say everything is fine
         return 0;
     }
@@ -197,8 +213,19 @@ void init_bypassDyldLibValidation() {
     NSDebugLog(@"[DyldLVBypass] init");
     
     if (@available(iOS 26.0, *)) {
-        redirectFunction = redirectFunctionMirrored;
+        if (DeviceRequiresTXMWorkaround()) {
+            NSDebugLog(@"[DyldLVBypass] Using redirectFunctionMirrored");
+            redirectFunction = redirectFunctionMirrored;
+        } else {
+            // Special special case for non-TXM iOS 26+
+            // We can JIT without script, but we cannot modify existing code in dsc without it.
+            // Therefore, we choose a hook method that avoids patching code in dsc completely, using hardware breakpoint.
+            // The function only stashes the original function pointers, and the breakpoint handler will redirect to our hook
+            NSDebugLog(@"[DyldLVBypass] Using redirectFunctionHWBreakpoint");
+            redirectFunction = redirectFunctionHWBreakpoint;
+        }
     } else {
+        NSDebugLog(@"[DyldLVBypass] Using redirectFunctionDirect");
         redirectFunction = redirectFunctionDirect;
     }
     

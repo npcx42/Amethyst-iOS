@@ -371,7 +371,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 
 - (void)invokeAfterJITEnabled:(void(^)(void))handler {
     localVersionList = remoteVersionList = nil;
-    BOOL hasTrollStoreJIT = getEntitlementValue(@"com.apple.private.local.sandboxed-jit");
+    BOOL hasTrollStoreJIT = getEntitlementValue(@"jb.pmap_cs_custom_trust");
 
     if (isJITEnabled(false)) {
         [ALTServerManager.sharedManager stopDiscovering];
