@@ -140,6 +140,7 @@ void CTCDesktopPeer_openGlobal(JNIEnv *env, jclass clazz, jstring path) {
 void hackFix18LWJGL(void *addr) {
     addr = (void *)((uintptr_t)addr & ~PAGE_MASK);
     if(@available(iOS 19.0, *)) return;
+    if(!mprotect(addr, PAGE_SIZE, PROT_READ | PROT_EXEC)) return;
     // FIXME: For some reason the one page in liblwjgl.dylib is mapped as r-x/rwx (COW), and recent builds on iOS 18 switches it to r--/rw- causing codesign failure. Here we hack it to map anon page to get r-x back
     char tempPage[PAGE_SIZE];
     memcpy(tempPage, addr, PAGE_SIZE);
