@@ -16,6 +16,12 @@ extern NSNotificationName UIPresentationControllerPresentationTransitionWillBegi
 @end
 
 // private functions
+extern BOOL _UISolariumEnabled(void) __attribute__((weak_import));
+
+@interface UIBarButtonItem(private)
+- (UIView *)view;
+@end
+
 @interface UIContextMenuInteraction(private)
 - (void)_presentMenuAtLocation:(CGPoint)location;
 @end
@@ -35,6 +41,10 @@ extern NSNotificationName UIPresentationControllerPresentationTransitionWillBegi
 
 @interface UIScreen(private)
 - (void)_setUserInterfaceIdiom:(NSInteger)idiom;
+@end
+
+@interface UISegmentedControl(private)
+- (NSArray *)_uiktest_labelsWithState:(NSUInteger)state;
 @end
 
 @interface UITextField(private)

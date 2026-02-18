@@ -22,7 +22,6 @@ typedef void(^CreateView)(UITableViewCell *, NSString *, NSDictionary *);
 @property(nonatomic) NSMutableDictionary *currentMappings;
 @property(nonatomic) NSDictionary *keycodePlist;
 @property(nonatomic) UIPickerView *editPickMapping;
-@property(nonatomic) UIToolbar *editPickToolbar;
 @property(nonatomic) UITextField *activeTextField;
 @property(nonatomic) NSArray<NSString*>* prefSections;
 @property(nonatomic) NSMutableArray<NSNumber*>* prefSectionsVisibility;
@@ -59,10 +58,6 @@ typedef void(^CreateView)(UITableViewCell *, NSString *, NSDictionary *);
     self.editPickMapping = [[UIPickerView alloc] init];
     self.editPickMapping.delegate = self;
     self.editPickMapping.dataSource = self;
-    self.editPickToolbar = [[UIToolbar alloc] initWithFrame:CGRectMake(0.0, 0.0, self.view.frame.size.width, 44.0)];
-    UIBarButtonItem *btnFlexibleSpace = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:self action:nil];
-    UIBarButtonItem *editDoneButton = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(closeTextField:)];
-    self.editPickToolbar.items = @[btnFlexibleSpace, editDoneButton];
 }
 
 - (void)loadGamepadConfigurationFile {
@@ -136,7 +131,6 @@ typedef void(^CreateView)(UITableViewCell *, NSString *, NSDictionary *);
             view.textAlignment = NSTextAlignmentRight;
             view.tintColor = UIColor.clearColor;
             view.adjustsFontSizeToFitWidth = YES;
-            view.inputAccessoryView = self.editPickToolbar;
             view.inputView = self.editPickMapping;
             cell.accessoryView = view;
         }

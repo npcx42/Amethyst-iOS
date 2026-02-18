@@ -292,8 +292,9 @@ void AWTInputBridge_sendKey(int keycode) {
     [self loadCustomControls];
 
     self.logOutputView = [[PLLogOutputView alloc] initWithFrame:self.view.frame];
-    self.logOutputView.autoresizingMask = UIViewAutoresizingFlexibleHeight | UIViewAutoresizingFlexibleWidth;
-    [self.view addSubview:self.logOutputView];
+    self.logOutputView.navController.additionalSafeAreaInsets = self.view.safeAreaInsets;
+    [self addChildViewController:self.logOutputView.navController];
+    [self.view addSubview:self.logOutputView.navController.view];
 
     setenv("POJAV_SKIP_JNI_GLFW", "1", 1);
  

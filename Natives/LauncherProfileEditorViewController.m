@@ -4,6 +4,7 @@
 #import "MinecraftResourceUtils.h"
 #import "PickTextField.h"
 #import "PLProfiles.h"
+#import "UIKit+hook.h"
 #import "ios_uikit_bridge.h"
 #import "utils.h"
 
@@ -218,7 +219,7 @@
     self.versionPickerView = [[UIPickerView alloc] init];
     self.versionPickerView.delegate = self;
     self.versionPickerView.dataSource = self;
-    self.versionPickerToolbar = [[UIToolbar alloc] initWithFrame:CGRectMake(0.0, 0.0, self.view.frame.size.width, 44.0)];
+    self.versionPickerToolbar = [[UIToolbar alloc] initWithFrame:CGRectMake(0, 0, 390, 44.0)];
     self.versionTypeControl = [[UISegmentedControl alloc] initWithItems:@[
         localize(@"Installed", nil),
         localize(@"Releases", nil),
@@ -226,12 +227,12 @@
         localize(@"Old-beta", nil),
         localize(@"Old-alpha", nil)
     ]];
+    self.versionTypeControl.frame = CGRectMake(0, 0, 390, 44.0);
+    self.versionTypeControl.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     [self.versionTypeControl addTarget:self action:@selector(changeVersionType:) forControlEvents:UIControlEventValueChanged];
-    self.versionPickerToolbar.items = @[
-        [[UIBarButtonItem alloc] initWithCustomView:self.versionTypeControl],
-        [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil],
-        [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(versionClosePicker)]
-    ];
+    // here we go some random private apis I found
+    [[self.versionTypeControl _uiktest_labelsWithState:0] makeObjectsPerformSelector:@selector(setNumberOfLines:) withObject:nil];
+    [self.versionPickerToolbar addSubview:self.versionTypeControl];
 }
 
 - (void)pickerView:(UIPickerView *)pickerView didSelectRow:(NSInteger)row inComponent:(NSInteger)component {

@@ -166,15 +166,21 @@ void* hooked_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off
         }
         
         void *memoryLoadedFile = __mmap(NULL, len, PROT_READ, MAP_PRIVATE, fd, offset);
-        // mirror `addr` (rx, JIT applied) to `mirrored` (rw)
-        vm_address_t mirrored = 0;
-        vm_prot_t cur_prot, max_prot;
-        kern_return_t ret = vm_remap(mach_task_self(), &mirrored, len, 0, VM_FLAGS_ANYWHERE, mach_task_self(), (vm_address_t)map, false, &cur_prot, &max_prot, VM_INHERIT_SHARE);
-        if(ret == KERN_SUCCESS) {
-            vm_protect(mach_task_self(), mirrored, len, NO,
-                       VM_PROT_READ | VM_PROT_WRITE);
-            memcpy((void*)mirrored, memoryLoadedFile, len);
-            vm_deallocate(mach_task_self(), mirrored, len);
+        if (redirectFunction == redirectFunctionDirect) {
+            mprotect(map, len, PROT_READ | PROT_WRITE);
+            memcpy(map, memoryLoadedFile, len);
+            mprotect(map, len, prot);
+        } else {
+            // mirror `addr` (rx, JIT applied) to `mirrored` (rw)
+            vm_address_t mirrored = 0;
+            vm_prot_t cur_prot, max_prot;
+            kern_return_t ret = vm_remap(mach_task_self(), &mirrored, len, 0, VM_FLAGS_ANYWHERE, mach_task_self(), (vm_address_t)map, false, &cur_prot, &max_prot, VM_INHERIT_SHARE);
+            if(ret == KERN_SUCCESS) {
+                vm_protect(mach_task_self(), mirrored, len, NO,
+                           VM_PROT_READ | VM_PROT_WRITE);
+                memcpy((void*)mirrored, memoryLoadedFile, len);
+                vm_deallocate(mach_task_self(), mirrored, len);
+            }
         }
         munmap(memoryLoadedFile, len);
     }

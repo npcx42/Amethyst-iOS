@@ -47,9 +47,6 @@ CGPoint lastVirtualMousePoint;
 @end
 
 @interface SurfaceViewController(LogView)
-
-- (void)viewWillTransitionToSize_LogView:(CGRect)frame;
-
 @end
 
 @interface SurfaceViewController(Navigation)<UIGestureRecognizerDelegate, UITableViewDataSource, UITableViewDelegate>

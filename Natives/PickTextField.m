@@ -1,4 +1,5 @@
 #import "PickTextField.h"
+#import "UIKit+hook.h"
 #import "utils.h"
 
 @interface PickViewController : UIViewController
@@ -8,7 +9,7 @@
 @implementation PickViewController
 - (void)loadView {
     [super loadView];
-    [self.view addSubview:self.textField.inputAccessoryView];
+    if(self.textField.inputAccessoryView) [self.view addSubview:self.textField.inputAccessoryView];
     [self.view addSubview:self.textField.inputView];
 }
 
@@ -19,8 +20,9 @@
         self.view.safeAreaInsets.top,
         MIN(self.view.frame.size.width - self.view.safeAreaInsets.right, self.preferredContentSize.width),
         MIN(self.view.frame.size.height - self.view.safeAreaInsets.bottom, self.preferredContentSize.height));
-    self.textField.inputAccessoryView.frame = CGRectMake(frame.origin.x, frame.origin.y, frame.size.width, self.textField.inputAccessoryView.frame.size.height);
-    self.textField.inputView.frame = CGRectMake(frame.origin.x, CGRectGetMaxY(self.textField.inputAccessoryView.frame), frame.size.width, frame.size.height - CGRectGetMaxY(self.inputAccessoryView.frame));
+    CGRect accessoryFrame = CGRectMake(frame.origin.x, frame.origin.y, frame.size.width, self.textField.inputAccessoryView.frame.size.height);
+    self.textField.inputAccessoryView.frame = accessoryFrame;
+    self.textField.inputView.frame = CGRectMake(frame.origin.x, CGRectGetMaxY(accessoryFrame), frame.size.width, frame.size.height - CGRectGetMaxY(self.inputAccessoryView.frame));
 }
 
 - (void)viewDidDisappear:(BOOL)animated {
@@ -49,13 +51,16 @@
 }
 
 - (BOOL)becomeFirstResponder {
-    if (!NSProcessInfo.processInfo.isMacCatalystApp) {
+    // iOS 26 uses popover aswell
+    BOOL hasLiquidGlass = _UISolariumEnabled && _UISolariumEnabled();
+    if (!hasLiquidGlass && !NSProcessInfo.processInfo.isMacCatalystApp) {
         return [super becomeFirstResponder];
     }
 
     self.vc = [[PickViewController alloc] init];
     self.vc.modalPresentationStyle = UIModalPresentationPopover;
-    self.vc.preferredContentSize = CGSizeMake(500, 250);
+    CGFloat width = MIN(400, MIN(self.window.frame.size.width, self.window.frame.size.height));
+    self.vc.preferredContentSize = CGSizeMake(width, 250);
     self.vc.textField = self;
 
     UIPopoverPresentationController *popoverController = [self.vc popoverPresentationController];
