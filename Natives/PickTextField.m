@@ -72,6 +72,9 @@
         showingVC = (id)showingVC.nextResponder;
     }
     [showingVC presentViewController:self.vc animated:YES completion:nil];
+    if([self.delegate respondsToSelector:@selector(textFieldDidBeginEditing:)]) {
+        [self.delegate textFieldDidBeginEditing:self];
+    }
 
     return YES;
 }
@@ -82,6 +85,9 @@
     }
 
     [self.vc dismissViewControllerAnimated:YES completion:NULL];
+    if([self.delegate respondsToSelector:@selector(textFieldDidEndEditing:)]) {
+        [self.delegate textFieldDidEndEditing:self];
+    }
     self.vc = nil;
     return YES;
 }

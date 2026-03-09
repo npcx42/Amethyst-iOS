@@ -12,6 +12,16 @@ TARGETS := $(TARGETS:$(SOURCEDIR)/%=$(OUTPUTDIR)/%.jar)
 JCFLAGS := -cp "$(subst $() $(),:,$(wildcard $(SOURCEDIR)/*/):$(wildcard libs/*/*.jar))" -XDignore.symbol.file
 
 all: $(TARGETS)
+	
+# Sometimes the CI produces empty class file resulting in broken jar, so we check and abort here
+check_empty_classes:
+	@set -e
+	@echo "Checking for empty class files"
+	$(eval EMPTY_CLASSES := $(shell find $(OUTPUTDIR) -name '*.class' -size 0))
+	@if [ -n "$(EMPTY_CLASSES)" ]; then \
+		echo "Error: found empty class files in $@: $(EMPTY_CLASSES)"; \
+		exit 1; \
+	fi
 
 # Rules for building java class
 $(CLASSES): $(OUTPUTDIR)/%.class: $(SOURCEDIR)/%.java
@@ -23,12 +33,12 @@ $(CLASSES): $(OUTPUTDIR)/%.class: $(SOURCEDIR)/%.java
 	@$(BOOTJDK)/javac $(JCFLAGS) -d $(OUTPUTDIR)/classes $<
 	@cp $(@:$(OUTPUTDIR)/$(TARGET)/%.class=$(OUTPUTDIR)/classes/%*.class) $(dir $@)/
 
-$(OUTPUTDIR)/launcher.jar: $(CLASSES)
+$(OUTPUTDIR)/launcher.jar: $(CLASSES) check_empty_classes
 	@set -e
 	@echo "Creating $@"
 	@$(BOOTJDK)/jar -cf $@ -C $(basename $@) .
 
-$(OUTPUTDIR)/lwjgl.jar: $(CLASSES)
+$(OUTPUTDIR)/lwjgl.jar: $(CLASSES) check_empty_classes
 	@set -e
 	@echo "Creating $@"
 	@mkdir -p $(OUTPUTDIR)/lwjgl_lib

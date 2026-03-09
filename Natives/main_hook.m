@@ -71,16 +71,22 @@ void* hooked_dlopen(const char* path, int mode) {
         shouldUseDyldBypass26PPL = hwRedirectOrig[0] && !DeviceRequiresTXMWorkaround();
     }
     // Only patch Mach-O and use dyld bypass dylib is in the home dir
+    // or tmp dir: LiveContainer makes a symlink to its own tmp dir so checking home dir alone would fail
     const char *home = getenv("HOME");
+    const char *tmp = getenv("TMPDIR");
     char fullpath[PATH_MAX];
-    if (path && realpath(path, fullpath) && strstr(fullpath, home)) {
+    BOOL shouldUseDyldBypass = path && realpath(path, fullpath) && (strstr(fullpath, home) || strstr(fullpath, tmp));
+    shouldUseDyldBypass26PPL &= shouldUseDyldBypass;
+    if (shouldUseDyldBypass) {
         PLPatchMachOPlatformForFile(path);
-    } else {
-        // Disable dyld bypass if not loading from home dir
-        shouldUseDyldBypass26PPL = NO;
     }
     if (shouldUseDyldBypass26PPL) {
         __attribute__((musttail)) return hooked_dlopen_26_ppl(path, mode);
+    } else if (shouldUseDyldBypass) {
+        /// Special case for LiveContainer multitask mode where it hooks dlopen to hook mmap, which will break this dyld bypass, so we redirect calls to the original dlopen.
+        static void *(*sys_dlopen)(const char *, int);
+        if(!sys_dlopen) sys_dlopen = dlsym(RTLD_NEXT, "dlopen");
+        __attribute__((musttail)) return sys_dlopen(path, mode);
     } else {
         __attribute__((musttail)) return orig_dlopen(path, mode);
     }
@@ -99,16 +105,16 @@ void *hooked_dlopen_26_ppl(const char *path, int mode) {
     }
     
     // save old thread states
-    exception_mask_t masks[32];
-    mach_msg_type_number_t masksCnt;
-    exception_handler_t handlers[32];
-    exception_behavior_t behaviors[32];
-    thread_state_flavor_t flavors[32];
+    exception_mask_t mask = EXC_MASK_BREAKPOINT;
+    mach_msg_type_number_t masksCnt = 1;
+    exception_handler_t handler = excPort;
+    exception_behavior_t behavior = EXCEPTION_STATE | MACH_EXCEPTION_CODES;
+    thread_state_flavor_t flavor = ARM_THREAD_STATE64;
     arm_debug_state64_t origDebugState;
     mach_port_t thread = mach_thread_self();
     thread_get_state(thread, ARM_DEBUG_STATE64, (thread_state_t)&origDebugState, &(mach_msg_type_number_t){ARM_DEBUG_STATE64_COUNT});
-    thread_get_exception_ports(thread, EXC_MASK_BREAKPOINT, masks, &masksCnt, handlers, behaviors, flavors);
-    thread_set_exception_ports(thread, EXC_MASK_BREAKPOINT, excPort, EXCEPTION_STATE | MACH_EXCEPTION_CODES, ARM_THREAD_STATE64);
+    thread_swap_exception_ports(thread, mask, handler, behavior, flavor, &mask, &masksCnt, &handler, &behavior, &flavor);
+    assert(masksCnt == 1);
     
     // hook stuff. this will overwrite LiveContainer private container multitask's hook, we will load __TEXT using JIT inside
     arm_debug_state64_t hookDebugState = {0};
@@ -132,10 +138,7 @@ void *hooked_dlopen_26_ppl(const char *path, int mode) {
     
     // restore old thread states
     thread_set_state(thread, ARM_DEBUG_STATE64, (thread_state_t)&origDebugState, ARM_DEBUG_STATE64_COUNT);
-    for (int i = 0; i < masksCnt; i++){
-        thread_set_exception_ports(mach_thread_self(), EXC_MASK_BREAKPOINT, handlers[i], behaviors[i], flavors[i]);
-        mach_port_deallocate(mach_task_self(), handlers[i]);
-    }
+    thread_swap_exception_ports(thread, mask, handler, behavior, flavor, &mask, &masksCnt, &handler, &behavior, &flavor);
     
     return result;
 }

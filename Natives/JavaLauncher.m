@@ -107,7 +107,8 @@ int launchJVM(NSString *username, id launchTarget, int width, int height, int mi
     BOOL requiresTXMWorkaround = DeviceRequiresTXMWorkaround();
     BOOL jit26AlwaysAttached = getPrefBool(@"debug.debug_always_attached_jit");
     if (requiresTXMWorkaround) {
-        void *result = JIT26CreateRegionLegacy(getpagesize());
+        static void *result;
+        if(!result) result = JIT26CreateRegionLegacy(getpagesize());
         if ((uint32_t)result != 0x690000E0) {
             munmap(result, getpagesize());
             // we can't continue since legacy script only allows calling breakpoint once
@@ -124,7 +125,7 @@ int launchJVM(NSString *username, id launchTarget, int width, int height, int mi
                 }
             }
             [NSFileManager.defaultManager copyItemAtPath:inBundleScriptPath toPath:[NSString stringWithFormat:@"%s/UniversalJIT26.js", getenv("POJAV_HOME")] error:nil];
-            showDialog(localize(@"Error", nil), @"Support for legacy script has been removed. Please switch to Universal JIT script. To import it, long-press on Amethyst when enabling JIT in StikDebug and tap \"Assign Script\", then go to Amethyst's Documents directory and pick it.");
+            showDialog(localize(@"Error", nil), @"Support for legacy script has been removed. Please switch to Universal JIT script. To import it, long-press on Amethyst when enabling JIT in StikDebug and tap \"Assign Script\", then go to Amethyst's Documents directory and pick it. (on sideloaded StikDebug, the builtin script is named Amethyst-MeloNX.js)");
             [PLLogOutputView handleExitCode:1];
             return 1;
         }
@@ -134,8 +135,15 @@ int launchJVM(NSString *username, id launchTarget, int width, int height, int mi
         task_set_exception_ports(mach_task_self(), EXC_MASK_BAD_ACCESS, 0, EXCEPTION_DEFAULT, MACHINE_THREAD_STATE);
     }
     if (!requiresTXMWorkaround || jit26AlwaysAttached) {
+        if (jit26AlwaysAttached) {
+            // Only allow StikDebug to catch our breakpoints to prevent any stutters
+            task_set_exception_ports(mach_task_self(), EXC_MASK_ALL & ~EXC_MASK_BREAKPOINT, 0,
+                EXCEPTION_DEFAULT, THREAD_STATE_NONE);
+        }
         // Activate Library Validation bypass for external runtime and dylibs (JNA, etc)
         init_bypassDyldLibValidation();
+    } else {
+        NSLog(@"[DyldLVBypass] Hook disabled! Loading unsigned dylib will cause code signature error.");
     }
 
 
@@ -145,6 +153,7 @@ int launchJVM(NSString *username, id launchTarget, int width, int height, int mi
     BOOL launchJar = NO;
     NSString *gameDir;
     NSString *defaultJRETag;
+    NSCAssert(launchTarget, @"Unexpected nil launchTarget");
     if ([launchTarget isKindOfClass:NSDictionary.class]) {
         // Get preferred Java version from current profile
         int preferredJavaVersion = [PLProfiles resolveKeyForCurrentProfile:@"javaVersion"].intValue;

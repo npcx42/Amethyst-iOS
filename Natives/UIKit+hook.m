@@ -55,6 +55,12 @@ void init_hookUIKitConstructor(void) {
    }
 }
 
+@implementation UIBarButtonItem(addition)
+- (UIView *)buttonGlassView {
+    return self.view.superview.superview.superview.superview;
+}
+@end
+
 @implementation UIDevice(hook)
 
 - (NSString *)completeOSVersion {

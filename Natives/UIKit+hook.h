@@ -15,6 +15,10 @@ extern NSNotificationName UIPresentationControllerPresentationTransitionWillBegi
 - (UIImage *)hook_imageWithSize:(CGSize)size;
 @end
 
+@interface UIBarButtonItem(addition)
+- (UIView *)buttonGlassView;
+@end
+
 // private functions
 extern BOOL _UISolariumEnabled(void) __attribute__((weak_import));
 
@@ -63,6 +67,10 @@ extern BOOL _UISolariumEnabled(void) __attribute__((weak_import));
 @interface UIPointerInteraction(private)
 - (NSArray <id<_UIPointerInteractionDriver>> *)drivers;
 - (id<_UIPointerInteractionDriver>)driver;
+@end
+
+@interface UIPopoverPresentationController(private)
+- (BOOL)_isDismissing;
 @end
 
 /*

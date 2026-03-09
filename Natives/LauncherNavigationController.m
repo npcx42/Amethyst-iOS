@@ -18,6 +18,7 @@
 #import "ios_uikit_bridge.h"
 #import "utils.h"
 
+#import <objc/runtime.h>
 #include <sys/time.h>
 
 #define AUTORESIZE_MASKS UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin
@@ -28,7 +29,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 }
 
 @property(nonatomic) MinecraftResourceDownloadTask* task;
-@property(nonatomic) DownloadProgressViewController* progressVC;
+@property(nonatomic) UINavigationController* progressVC;
 @property(nonatomic) NSArray* globalToolbarItems;
 @property(nonatomic) PLPickerView* versionPickerView;
 @property(nonatomic) UITextField* versionTextField;
@@ -85,7 +86,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
                                                                  action:@selector(performInstallOrShowDetails:)];
         self.buttonInstallItem.enabled = NO;
         dispatch_async(dispatch_get_main_queue(), ^{
-            self.buttonInstallItem.view.superview.superview.superview.superview.backgroundColor = [UIColor colorWithRed:121/255.0 green:56/255.0 blue:162/255.0 alpha:0.5];
+            self.buttonInstallItem.buttonGlassView.backgroundColor = [UIColor colorWithRed:121/255.0 green:56/255.0 blue:162/255.0 alpha:0.5];
         });
         [textFieldContainer addSubview:self.versionTextField];
         UIBarButtonItem *textFieldItem = [[UIBarButtonItem alloc] initWithCustomView:textFieldContainer];
@@ -257,12 +258,6 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 }
 
 - (void)setInteractionEnabled:(BOOL)enabled forDownloading:(BOOL)downloading {
-    for (UIControl *view in self.toolbar.subviews) {
-        if ([view isKindOfClass:UIControl.class]) {
-            view.alpha = enabled ? 1 : 0.2;
-            view.enabled = enabled;
-        }
-    }
     self.versionTextField.alpha = enabled ? 1 : 0.2;
     self.versionTextField.enabled = enabled;
     self.progressViewMain.hidden = enabled;
@@ -276,6 +271,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
             self.buttonInstallItem.enabled = YES;
         }
     } else {
+        self.buttonInstall.enabled = enabled;
         self.buttonInstallItem.enabled = enabled;
     }
     UIApplication.sharedApplication.idleTimerDisabled = !enabled;
@@ -327,18 +323,31 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     });
 }
 
-- (void)performInstallOrShowDetails:(UIBarButtonItem *)sender {
+- (void)performInstallOrShowDetails:(id)sender {
+    BOOL usesBarButtonItem = [sender isKindOfClass:UIBarButtonItem.class];
     if (self.task) {
         if (!self.progressVC) {
-            self.progressVC = [[DownloadProgressViewController alloc] initWithTask:self.task];
+            UIViewController *vc = [[DownloadProgressViewController alloc] initWithTask:self.task];
+            self.progressVC = [[UINavigationController alloc] initWithRootViewController:vc];
+            self.progressVC.modalPresentationStyle = UIModalPresentationPopover;
+        } else if (self.progressVC.popoverPresentationController._isDismissing) {
+            // FIXME: stock bug? it crashes when users dismisses and presents this vc too fast
+            // "UIPopoverPresentationController () should have a non-nil sourceView or barButtonItem set before the presentation occurs."
+            return;
         }
-        UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:self.progressVC];
-        nav.modalPresentationStyle = UIModalPresentationPopover;
-        nav.popoverPresentationController.sourceView = sender.view;
-        [self presentViewController:nav animated:YES completion:nil];
+        
+        if (usesBarButtonItem) {
+            self.progressVC.popoverPresentationController.barButtonItem = sender;
+        } else {
+            self.progressVC.popoverPresentationController.sourceView = sender;
+        }
+        [self presentViewController:self.progressVC animated:YES completion:nil];
     } else {
+        if (usesBarButtonItem) {
+            sender = ((UIBarButtonItem *)sender).buttonGlassView;
+        }
         [self launchMinecraft:sender];
-    } 
+    }
 }
 
 - (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
@@ -373,8 +382,9 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 
         self.progressViewMain.observedProgress = nil;
         if (self.task.metadata) {
+            __block NSDictionary *metadata = self.task.metadata;
             [self invokeAfterJITEnabled:^{
-                UIKit_launchMinecraftSurfaceVC(self.view.window, self.task.metadata);
+                UIKit_launchMinecraftSurfaceVC(self.view.window, metadata);
             }];
         } else {
             [self reloadProfileList];
@@ -414,6 +424,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 - (void)invokeAfterJITEnabled:(void(^)(void))handler {
     localVersionList = remoteVersionList = nil;
     BOOL hasTrollStoreJIT = getEntitlementValue(@"jb.pmap_cs_custom_trust");
+    BOOL isLiveContainer = getenv("LC_HOME_PATH") != NULL;
 
     if (isJITEnabled(false)) {
         [ALTServerManager.sharedManager stopDiscovering];
@@ -427,6 +438,16 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         NSLog(@"Debug option skipped waiting for JIT. Java might not work.");
         handler();
         return;
+    } else if (@available(iOS 17.4, *)) {
+        NSString *scriptDataString = @"";
+        if(DeviceRequiresTXMWorkaround()) {
+            NSData *scriptData = [NSData dataWithContentsOfFile:[NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"UniversalJIT26.js"]];
+            scriptDataString = [@"&script-data=" stringByAppendingString:[scriptData base64EncodedStringWithOptions:0]];
+        }
+        [UIApplication.sharedApplication openURL:[NSURL URLWithString:[NSString stringWithFormat:@"stikjit://enable-jit?bundle-id=%@&pid=%d%@", NSBundle.mainBundle.bundleIdentifier, getpid(), scriptDataString]] options:@{} completionHandler:nil];
+    } else {
+        // Assuming 16.7-17.3.1. SideStore still lacks this URL scheme at the time of writing, so it only jumps to SideStore.
+        [UIApplication.sharedApplication openURL:[NSURL URLWithString:[NSString stringWithFormat:@"sidestore://sidejit-enable?pid=%d", getpid()]] options:@{} completionHandler:nil];
     }
 
     self.progressText.text = localize(@"launcher.wait_jit.title", nil);
